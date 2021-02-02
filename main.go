@@ -45,7 +45,7 @@ func main() {
 				Name:        "URI",
 				Aliases:     []string{"U"},
 				Destination: &rawURL,
-				Usage:       "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port",
+				Usage:       "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port, as you may know it from sftp",
 				EnvVars:     []string{"SFTP_URL", "GDCSFTP_URL"},
 				Required:    true,
 			},
@@ -106,7 +106,12 @@ func main() {
 						//cli.ShowCommandHelpAndExit(c, "ls", 1)
 					}
 
-					conn := ConnectSSH(rawURL)
+					parsedURL, err := url.Parse(rawURL)
+					if err != nil {
+						log.Fatalf("Failed to parse URL: %s: %v", rawURL, err)
+					}
+
+					conn := ConnectSSH(parsedURL)
 					defer conn.Close()
 
 					sc, err := NewClient(conn)
@@ -136,7 +141,12 @@ func main() {
 						cli.ShowCommandHelpAndExit(c, "get", 1)
 					}
 
-					conn := ConnectSSH(rawURL)
+					parsedURL, err := url.Parse(rawURL)
+					if err != nil {
+						log.Fatalf("Failed to parse URL: %s: %v", rawURL, err)
+					}
+
+					conn := ConnectSSH(parsedURL)
 					defer conn.Close()
 					sc, err := NewClient(conn)
 					if err != nil {
@@ -146,10 +156,13 @@ func main() {
 
 					for _, rfile := range c.Args().Slice() {
 						//downloadFile(*sc, "./remote.txt", "./download.txt")
-						sc.Get(rfile, filepath.Base(rfile))
+						lfile := filepath.Base(rfile)
+						written, err := sc.Get(rfile, lfile)
 						if err != nil {
-							log.Printf("Could not download %s: %v", rfile, err)
+							log.Printf("W! GET %s Failed: %s", rfile, err)
+							continue
 						}
+						log.Printf("D! GET %s to %s OK %d", rfile, lfile, written)
 					}
 					return nil
 				},
@@ -159,9 +172,16 @@ func main() {
 				},
 			},
 			{
-				Name:      "put",
-				Usage:     "upload local files to a remote SFTP server",
-				UsageText: "tinysftp put [opts] local-path [remote-path]",
+				Name:  "put",
+				Usage: "upload local files to a remote SFTP server",
+				UsageText: `tinysftp put [opts] local-path [remote-path]
+
+EXAMPLE: 
+   # Quote local-path if you use globbing
+   tinysftp -U sftp://user:pass@server.sftp.com:port put "testfile*.txt" RemoteDir
+
+   tinysftp -U sftp://user:pass@server.sftp.com:port put file1.txt RemoteDir/file2.txt
+   `,
 				Description: `Upload local-path and store it on the remote machine. If
 the remote path name is not specified, it is given the same
 name it has on the local machine. local-path may contain
@@ -170,15 +190,41 @@ and remote-path is specified, then remote-path must
 specify a directory.`,
 				ArgsUsage: "local file(s)",
 				// Flags: []cli.Flag{
-				// 	&cli.BoolFlag{Name: "forever", Aliases: []string{"forevvarr"}},
+				// 	&cli.BoolFlag{
+				// 		Name: "r",
+				// 		//Destination: &insecureIgnoreHostKey,
+				// 		Usage: "Recursively copy entire directories when uploading and downloading. Note that sftp does not follow symbolic links encountered in the tree traversal.",
+				// 	},
 				// },
+				// -E      Delete source files after successful transfer (dangerous)
 				Action: func(c *cli.Context) error {
 					if c.NArg() < 1 {
-						fmt.Fprintf(c.App.Writer, "ERROR: no local files given for upload\n\n")
+						fmt.Fprintf(c.App.Writer, "E! no local files given for upload\n\n")
 						cli.ShowCommandHelpAndExit(c, "put", 1)
 					}
+					//fmt.Println(c.Args().Slice())
 
-					conn := ConnectSSH(rawURL)
+					localPath := c.Args().Get(0)
+					localFiles, err := filepath.Glob(localPath)
+					if err != nil {
+						return fmt.Errorf("E! invalid local-path: %s", err)
+					}
+					if len(localFiles) < 1 {
+						return fmt.Errorf("E! local files do not exist")
+					}
+
+					parsedURL, err := url.Parse(rawURL)
+					if err != nil {
+						log.Fatalf("Failed to parse URL: %s: %v", rawURL, err)
+					}
+
+					remotePath := parsedURL.Path
+					// command args overwrite URL
+					if c.Args().Get(1) != "" {
+						remotePath = c.Args().Get(1)
+					}
+
+					conn := ConnectSSH(parsedURL)
 					defer conn.Close()
 					sc, err := NewClient(conn)
 					if err != nil {
@@ -186,35 +232,26 @@ specify a directory.`,
 					}
 					defer sc.Close()
 
-					localPath := c.Args().Get(0)
-					localFiles, err := filepath.Glob(localPath)
-					if err != nil {
-						return fmt.Errorf("invalid local-path: %s", err)
-					}
-					if len(localFiles) < 1 {
-						return fmt.Errorf("no local files found: %s", localPath)
-					}
-
-					remotePath := c.Args().Get(1)
-
 					if len(localFiles) == 1 && localFiles[0] == localPath {
 						// no globbing
 						if remotePath == "" {
 							remotePath = filepath.Base(localPath)
 						}
-						//uploadFile(sc, "./local.txt", "./remote.txt")
-						err := sc.Put(localPath, remotePath)
+						written, err := sc.Put(localPath, remotePath) //uploadFile(sc, "./local.txt", "./remote.txt")
 						if err != nil {
-							return fmt.Errorf("Could not upload %s: %v", localPath, err)
+							log.Printf("W! UPLOAD %s to %s Failed: %s", localPath, remotePath, err)
+							return fmt.Errorf("W! Could not upload %s: %v", localPath, err)
 						}
+						log.Printf("D! UPLOAD %s to %s OK %d", localPath, remotePath, written)
 					} else {
 						// globbing i.e. remote-path must specify a directory
 						for _, lfile := range localFiles {
-							remotePath = filepath.Join(remotePath, filepath.Base(lfile))
-							err := sc.Put(lfile, remotePath)
+							remPath := filepath.Join(remotePath, filepath.Base(lfile))
+							written, err := sc.Put(lfile, remPath)
 							if err != nil {
-								log.Printf("Could not upload %s: %v", lfile, err)
+								log.Printf("W! UPLOAD %s to %s Failed: %s", lfile, remPath, err)
 							}
+							log.Printf("D! UPLOAD %s to %s OK %d", lfile, remPath, written)
 						}
 					}
 					return nil
@@ -235,12 +272,7 @@ specify a directory.`,
 }
 
 // ConnectSSH starts a client connection to the SSH server given by rawURL.
-func ConnectSSH(rawURL string) *ssh.Client {
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil {
-		log.Fatalf("Failed to parse URL: %s: %v", rawURL, err)
-	}
-
+func ConnectSSH(parsedURL *url.URL) *ssh.Client {
 	user := parsedURL.User.Username()
 	pass, _ := parsedURL.User.Password()
 	host := parsedURL.Hostname()
@@ -273,17 +305,17 @@ func ConnectSSH(rawURL string) *ssh.Client {
 	} else {
 		hostKey, err := getHostKey(host, port)
 		if err != nil {
-			log.Fatalf("SSH host key: %v", err)
+			log.Fatalf("E: SSH host key: %v", err)
 		}
 		config.HostKeyCallback = ssh.FixedHostKey(hostKey)
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("Connecting to %s ...", addr)
+	log.Printf("I! Connecting to %s ...", addr)
 	conn, err := ssh.Dial("tcp", addr, &config)
 	//conn, _, _, err := ssh.NewClientConn("tcp", addr, &config)
 	if err != nil {
-		log.Fatalf("Failed to connect to %s: %v", addr, err)
+		log.Fatalf("E: Failed to connect to %s: %v", addr, err)
 	}
 
 	return conn
@@ -300,6 +332,7 @@ func getHostKey(hostname string, port int) (ssh.PublicKey, error) {
 	}
 	defer file.Close()
 
+	// see golang.org/x/crypto/ssh/knownhosts Normalize()
 	host := hostname
 	if port != 22 {
 		host = fmt.Sprintf("[%s]:%d", host, port)

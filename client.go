@@ -58,47 +58,42 @@ func (c *Client) List(remoteDir string) error {
 			modTime = ""
 			size = "PRE"
 		}
-		// Output each file name and size in bytes
 		fmt.Fprintf(os.Stdout, "%19s %12s %s\n", modTime, size, name)
 	}
 	return nil
 }
 
-// Get downloads a file from the sftp server.
-func (c *Client) Get(remoteFile, localFile string) error {
-	fmt.Fprintf(os.Stdout, "GET %s to %s ...\n", remoteFile, localFile)
+// Get downloads a file from the sftp server. It returns the number of bytes copied
+// and the first error encountered, if any.
+func (c *Client) Get(remoteFile, localFile string) (written int64, err error) {
 	// Note: SFTP To Go doesn't support O_RDWR mode
 	//srcFile, err := sc.OpenFile(remoteFile, (os.O_RDONLY))
 	srcFile, err := c.sftpc.Open(remoteFile)
 	if err != nil {
-		return fmt.Errorf("Could not open remote file: %v", err)
+		return 0, err
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(localFile)
 	if err != nil {
-		return fmt.Errorf("Could not open local file: %v", err)
+		return 0, err
 	}
 	defer dstFile.Close()
 
-	bytes, err := io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("Could not download remote file: %v", err)
-	}
-	fmt.Fprintf(os.Stdout, "%d bytes copied\n", bytes)
-	return nil
+	written, err = io.Copy(dstFile, srcFile)
+	return
 }
 
 // Put uploads localFile to remoteFile on the sftp server.
-func (c *Client) Put(localFile, remoteFile string) error {
+// It returns the number of bytes copied and the first error encountered, if any.
+func (c *Client) Put(localFile, remoteFile string) (written int64, err error) {
 	if remoteFile == "" {
 		remoteFile = filepath.Base(localFile)
 	}
-	fmt.Fprintf(os.Stdout, "Uploading [%s] to [%s] ...\n", localFile, remoteFile)
 
 	srcFile, err := os.Open(localFile)
 	if err != nil {
-		return fmt.Errorf("Could not open local file: %v", err)
+		return 0, err
 	}
 	defer srcFile.Close()
 
@@ -109,14 +104,10 @@ func (c *Client) Put(localFile, remoteFile string) error {
 	// Note: SFTP To Go doesn't support O_RDWR mode
 	dstFile, err := c.sftpc.OpenFile(remoteFile, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
 	if err != nil {
-		return fmt.Errorf("Could not open remote file: %v", err)
+		return 0, err
 	}
 	defer dstFile.Close()
 
-	bytes, err := io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("Could not upload local file: %v", err)
-	}
-	fmt.Fprintf(os.Stdout, "%d bytes copied\n", bytes)
-	return nil
+	written, err = io.Copy(dstFile, srcFile)
+	return
 }
