@@ -26,6 +26,12 @@ var (
 	insecureIgnoreHostKey bool // SSH option StrictHostKeyChecking
 )
 
+// A fileCouple is a couple of a local and remote file.
+type fileCouple struct {
+	localPath  string
+	remotePath string
+}
+
 func main() {
 	var rawURL string
 	//var conn *ssh.Client
@@ -178,7 +184,7 @@ func main() {
 
 EXAMPLE: 
    # Quote local-path if you use globbing
-   tinysftp -U sftp://user:pass@server.sftp.com:port put "testfile*.txt" RemoteDir
+   tinysftp -U sftp://user:pass@server.sftp.com:port put "testfile*.txt" RemoteDir/
 
    tinysftp -U sftp://user:pass@server.sftp.com:port put file1.txt RemoteDir/file2.txt
    `,
@@ -187,7 +193,7 @@ the remote path name is not specified, it is given the same
 name it has on the local machine. local-path may contain
 glob characters and may match multiple files. If it does 
 and remote-path is specified, then remote-path must
-specify a directory.`,
+specify a directory that must end with a slash.`,
 				ArgsUsage: "local file(s)",
 				// Flags: []cli.Flag{
 				// 	&cli.BoolFlag{
@@ -205,13 +211,6 @@ specify a directory.`,
 					//fmt.Println(c.Args().Slice())
 
 					localPath := c.Args().Get(0)
-					localFiles, err := filepath.Glob(localPath)
-					if err != nil {
-						return fmt.Errorf("E! invalid local-path: %s", err)
-					}
-					if len(localFiles) < 1 {
-						return fmt.Errorf("E! local files do not exist")
-					}
 
 					parsedURL, err := url.Parse(rawURL)
 					if err != nil {
@@ -224,6 +223,11 @@ specify a directory.`,
 						remotePath = c.Args().Get(1)
 					}
 
+					couples, err := resolveUploads(localPath, remotePath)
+					if err != nil {
+						return err
+					}
+
 					conn := ConnectSSH(parsedURL)
 					defer conn.Close()
 					sc, err := NewClient(conn)
@@ -232,27 +236,12 @@ specify a directory.`,
 					}
 					defer sc.Close()
 
-					if len(localFiles) == 1 && localFiles[0] == localPath {
-						// no globbing
-						if remotePath == "" {
-							remotePath = filepath.Base(localPath)
-						}
-						written, err := sc.Put(localPath, remotePath) //uploadFile(sc, "./local.txt", "./remote.txt")
+					for _, couple := range couples {
+						written, err := sc.Put(couple.localPath, couple.remotePath) //uploadFile(sc, "./local.txt", "./remote.txt")
 						if err != nil {
-							log.Printf("W! UPLOAD %s to %s Failed: %s", localPath, remotePath, err)
-							return fmt.Errorf("W! Could not upload %s: %v", localPath, err)
+							log.Printf("W! UPLOAD %s to %s Failed: %s", couple.localPath, couple.remotePath, err)
 						}
-						log.Printf("D! UPLOAD %s to %s OK %d", localPath, remotePath, written)
-					} else {
-						// globbing i.e. remote-path must specify a directory
-						for _, lfile := range localFiles {
-							remPath := filepath.Join(remotePath, filepath.Base(lfile))
-							written, err := sc.Put(lfile, remPath)
-							if err != nil {
-								log.Printf("W! UPLOAD %s to %s Failed: %s", lfile, remPath, err)
-							}
-							log.Printf("D! UPLOAD %s to %s OK %d", lfile, remPath, written)
-						}
+						log.Printf("D! UPLOAD %s to %s OK %d", couple.localPath, couple.remotePath, written)
 					}
 					return nil
 				},
@@ -360,4 +349,40 @@ func getHostKey(hostname string, port int) (ssh.PublicKey, error) {
 	}
 
 	return hostKey, nil
+}
+
+// resolveUploads forms pairs of local- and remote files depending on the args.
+func resolveUploads(localPath, remotePath string) (couples []fileCouple, err error) {
+	localFiles, err := filepath.Glob(localPath)
+	if err != nil {
+		return couples, fmt.Errorf("E! invalid local-path: %s", err)
+	}
+	if len(localFiles) < 1 {
+		return couples, fmt.Errorf("E! local files do not exist")
+	}
+
+	sep := string(filepath.Separator)
+
+	// the given local-path did not contain globs
+	if len(localFiles) == 1 && localFiles[0] == localPath {
+		if remotePath == "" {
+			remotePath = filepath.Base(localPath)
+		} else if strings.HasSuffix(remotePath, sep) { // remotePath is a dir
+			remotePath = filepath.Join(remotePath, filepath.Base(localPath))
+		}
+		couples = append(couples, fileCouple{localPath, remotePath})
+		return
+	}
+
+	// globs i.e. remote-path must specify a directory
+	if remotePath != "" && !strings.HasSuffix(remotePath, sep) {
+		err = fmt.Errorf("E! local-path contains glob characters hence remote-path must be empty or specify a directory that must end with a slash")
+		return
+	}
+
+	for _, lfile := range localFiles {
+		remPath := filepath.Join(remotePath, filepath.Base(lfile))
+		couples = append(couples, fileCouple{lfile, remPath})
+	}
+	return
 }

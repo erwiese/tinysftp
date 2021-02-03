@@ -84,25 +84,25 @@ func (c *Client) Get(remoteFile, localFile string) (written int64, err error) {
 	return
 }
 
-// Put uploads localFile to remoteFile on the sftp server.
+// Put uploads localPath to remotePath on the sftp server.
 // It returns the number of bytes copied and the first error encountered, if any.
-func (c *Client) Put(localFile, remoteFile string) (written int64, err error) {
-	if remoteFile == "" {
-		remoteFile = filepath.Base(localFile)
+func (c *Client) Put(localPath, remotePath string) (written int64, err error) {
+	if remotePath == "" {
+		remotePath = filepath.Base(localPath)
 	}
 
-	srcFile, err := os.Open(localFile)
+	srcFile, err := os.Open(localPath)
 	if err != nil {
 		return 0, err
 	}
 	defer srcFile.Close()
 
-	if dir, _ := filepath.Split(remoteFile); dir != "" {
+	if dir, _ := filepath.Split(remotePath); dir != "" {
 		c.sftpc.MkdirAll(dir)
 	}
 
 	// Note: SFTP To Go doesn't support O_RDWR mode
-	dstFile, err := c.sftpc.OpenFile(remoteFile, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
+	dstFile, err := c.sftpc.OpenFile(remotePath, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
 	if err != nil {
 		return 0, err
 	}
