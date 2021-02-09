@@ -33,6 +33,11 @@ func (c *Client) Close() error {
 	return c.sftpc.Close()
 }
 
+// Glob returns the names of all files matching pattern or nil if there is no matching file.
+func (c *Client) Glob(pattern string) ([]string, error) {
+	return c.sftpc.Glob(pattern)
+}
+
 // MkdirAll creates a directory named path, along with any necessary parents,
 // and returns nil, or else returns an error.
 // If path is already a directory, MkdirAll does nothing and returns nil.
@@ -98,7 +103,9 @@ func (c *Client) Put(localPath, remotePath string) (written int64, err error) {
 	defer srcFile.Close()
 
 	if dir, _ := filepath.Split(remotePath); dir != "" {
-		c.sftpc.MkdirAll(dir)
+		if err = c.sftpc.MkdirAll(dir); err != nil {
+			return
+		}
 	}
 
 	// Note: SFTP To Go doesn't support O_RDWR mode

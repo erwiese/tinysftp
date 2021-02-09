@@ -23,7 +23,8 @@ const (
 )
 
 var (
-	insecureIgnoreHostKey bool // SSH option StrictHostKeyChecking
+	// SSH option StrictHostKeyChecking
+	insecureIgnoreHostKey bool
 )
 
 // A fileCouple is a couple of a local and remote file.
@@ -47,13 +48,13 @@ func main() {
 		ArgsUsage: "[args...]",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				// man sftp The destination may be specified either as [user@]host[:path] or as a URI in the form sftp://[user@]host[:port][/path].
 				Name:        "URI",
 				Aliases:     []string{"U"},
 				Destination: &rawURL,
-				Usage:       "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port, as you may know it from sftp",
-				EnvVars:     []string{"SFTP_URL", "GDCSFTP_URL"},
-				Required:    true,
+				// man sftp: The destination may be specified either as [user@]host[:path] or as a URI in the form sftp://[user@]host[:port][/path].
+				Usage:    "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port, as you may know it from sftp",
+				EnvVars:  []string{"SFTPGO_URL", "GDCSFTP_URL"},
+				Required: true,
 			},
 			&cli.BoolFlag{
 				Name:        "ignoreHostKey",
@@ -69,47 +70,10 @@ func main() {
 				UsageText:   "tinysftp ls [path]",
 				Description: "Display the remote directory listing of either path or the current directory if path is not specified.",
 				ArgsUsage:   "remote path",
-
-				/* 				ls [-1afhlnrSt] [path]
-				   				Display a remote directory listing of either path or the current directory if path is not specified.  path may contain glob(7) characters and may
-				   				match multiple files.
-
-				   				The following flags are recognized and alter the behaviour of ls accordingly:
-				   				-1      Produce single columnar output.
-				   				-a      List files beginning with a dot (‘.’).
-				   				-f      Do not sort the listing.  The default sort order is lexicographical.
-				   				-h      When used with a long format option, use unit suffixes: Byte, Kilobyte, Megabyte, Gigabyte, Terabyte, Petabyte, and Exabyte in order to
-				   						reduce the number of digits to four or fewer using powers of 2 for sizes (K=1024, M=1048576, etc.).
-				   				-l      Display additional details including permissions and ownership information.
-				   				-n      Produce a long listing with user and group information presented numerically.
-				   				-r      Reverse the sort order of the listing.
-				   				-S      Sort the listing by file size.
-				   				-t      Sort the listing by last modification time. */
-
-				// Flags: []cli.Flag{
-				// 	&cli.BoolFlag{Name: "forever", Aliases: []string{"forevvarr"}},
-				// },
-				//SkipFlagParsing: false,
-				//HideHelp:        false,
-				//Hidden:          false,
-				//HelpName:        "puti",
-				// BashComplete: func(c *cli.Context) {
-				// 	fmt.Fprintf(c.App.Writer, "--better\n")
-				// },
 				Action: func(c *cli.Context) error {
-					// c.Command.FullName()
-					// c.Command.HasName("wop")
-					// c.Command.Names()
-					// c.Command.VisibleFlags()
-					// fmt.Fprintf(c.App.Writer, "dodododododoodododddooooododododooo\n")
-					// if c.Bool("forever") {
-					//   c.Command.Run(c)
-					// }
 					remotePath := "."
 					if c.NArg() == 1 {
 						remotePath = c.Args().First()
-						// fmt.Fprintf(c.App.Writer, "ERROR: no local files given for upload\n\n")
-						//cli.ShowCommandHelpAndExit(c, "ls", 1)
 					}
 
 					parsedURL, err := url.Parse(rawURL)
@@ -136,16 +100,29 @@ func main() {
 				},
 			},
 			{
-				Name:        "get",
-				Usage:       "download file(s) from a remote SFTP server",
-				UsageText:   "tinysftp get remote-path [local-path]",
-				Description: "The downloaded",
-				ArgsUsage:   "remote file(s)",
+				Name:  "get",
+				Usage: "retrieve remote file(s)",
+				UsageText: `tinysftp get remote-path [local-path]
+
+EXAMPLE: 
+		# Quote remote-path if you use globbing
+		tinysftp -U sftp://user:pass@server.sftp.com:port get "testfile*.txt" localDir
+				
+		tinysftp -U sftp://user:pass@server.sftp.com:port get file1.txt localDir/file2.txt
+				   `,
+				Description: `Retrieve the remote-path and store it on the local machine.  
+If the local-path name is not specified, it is given the same name it has on the remote
+machine. Remote-path may contain glob characters and may match multiple files. 
+If it does and local-path is specified, then local-path must specify a directory.
+				`,
+				ArgsUsage: "remote file(s)",
 				Action: func(c *cli.Context) error {
 					if c.NArg() < 1 {
-						fmt.Fprintf(c.App.Writer, "ERROR: no files given for download\n\n")
+						fmt.Fprintf(c.App.Writer, "no remote-path given\n\n")
 						cli.ShowCommandHelpAndExit(c, "get", 1)
 					}
+					remotePath := c.Args().Get(0)
+					localPath := c.Args().Get(1)
 
 					parsedURL, err := url.Parse(rawURL)
 					if err != nil {
@@ -160,26 +137,37 @@ func main() {
 					}
 					defer sc.Close()
 
-					for _, rfile := range c.Args().Slice() {
-						//downloadFile(*sc, "./remote.txt", "./download.txt")
-						lfile := filepath.Base(rfile)
-						written, err := sc.Get(rfile, lfile)
-						if err != nil {
-							log.Printf("W! GET %s Failed: %s", rfile, err)
+					remotePaths, err := sc.Glob(remotePath)
+					if len(remotePaths) == 0 {
+						fmt.Fprintf(c.App.Writer, "No remote-path found named %q\n\n", remotePath)
+						os.Exit(0)
+					}
+
+					couples, err := resolveDownloads(remotePaths, localPath)
+					if err != nil {
+						return err
+					}
+
+					for _, couple := range couples {
+						if _, err := os.Stat(couple.localPath); !os.IsNotExist(err) {
+							log.Printf("W! local-path already exists - no overwrite: %s", couple.localPath)
 							continue
 						}
-						log.Printf("D! GET %s to %s OK %d", rfile, lfile, written)
+						starttime := time.Now()
+						written, err := sc.Get(couple.remotePath, couple.localPath)
+						dur := time.Since(starttime)
+						if err != nil {
+							log.Printf("W! GET %s to %s Failed: %s", couple.remotePath, couple.localPath, err)
+							continue
+						}
+						log.Printf("D! GET %s to %s OK %d %s", couple.remotePath, couple.localPath, written, dur)
 					}
 					return nil
-				},
-				OnUsageError: func(c *cli.Context, err error, isSubcommand bool) error {
-					fmt.Fprintf(c.App.Writer, "for shame\n")
-					return err
 				},
 			},
 			{
 				Name:  "put",
-				Usage: "upload local files to a remote SFTP server",
+				Usage: "upload local file(s) to a remote server",
 				UsageText: `tinysftp put [opts] local-path [remote-path]
 
 EXAMPLE: 
@@ -189,11 +177,11 @@ EXAMPLE:
    tinysftp -U sftp://user:pass@server.sftp.com:port put file1.txt RemoteDir/file2.txt
    `,
 				Description: `Upload local-path and store it on the remote machine. If
-the remote path name is not specified, it is given the same
+the remote-path name is not specified, it is given the same
 name it has on the local machine. local-path may contain
 glob characters and may match multiple files. If it does 
 and remote-path is specified, then remote-path must
-specify a directory that must end with a slash.`,
+specify a directory.`,
 				ArgsUsage: "local file(s)",
 				// Flags: []cli.Flag{
 				// 	&cli.BoolFlag{
@@ -205,7 +193,7 @@ specify a directory that must end with a slash.`,
 				// -E      Delete source files after successful transfer (dangerous)
 				Action: func(c *cli.Context) error {
 					if c.NArg() < 1 {
-						fmt.Fprintf(c.App.Writer, "E! no local files given for upload\n\n")
+						fmt.Fprintf(c.App.Writer, "no local-path given\n\n")
 						cli.ShowCommandHelpAndExit(c, "put", 1)
 					}
 					//fmt.Println(c.Args().Slice())
@@ -237,17 +225,16 @@ specify a directory that must end with a slash.`,
 					defer sc.Close()
 
 					for _, couple := range couples {
-						written, err := sc.Put(couple.localPath, couple.remotePath) //uploadFile(sc, "./local.txt", "./remote.txt")
+						starttime := time.Now()
+						written, err := sc.Put(couple.localPath, couple.remotePath)
+						dur := time.Since(starttime)
 						if err != nil {
-							log.Printf("W! UPLOAD %s to %s Failed: %s", couple.localPath, couple.remotePath, err)
+							log.Printf("W! PUT %s to %s Failed: %s", couple.localPath, couple.remotePath, err)
+							continue
 						}
-						log.Printf("D! UPLOAD %s to %s OK %d", couple.localPath, couple.remotePath, written)
+						log.Printf("D! PUT %s to %s OK %d %s", couple.localPath, couple.remotePath, written, dur)
 					}
 					return nil
-				},
-				OnUsageError: func(c *cli.Context, err error, isSubcommand bool) error {
-					fmt.Fprintf(c.App.Writer, "for shame\n")
-					return err
 				},
 			},
 		},
@@ -257,7 +244,6 @@ specify a directory that must end with a slash.`,
 	if err != nil {
 		log.Fatal(err)
 	}
-
 }
 
 // ConnectSSH starts a client connection to the SSH server given by rawURL.
@@ -351,7 +337,44 @@ func getHostKey(hostname string, port int) (ssh.PublicKey, error) {
 	return hostKey, nil
 }
 
-// resolveUploads forms pairs of local- and remote files depending on the args.
+// resolveDownloads forms pairs of local- and remote files for download.
+func resolveDownloads(remotePaths []string, localPath string) (couples []fileCouple, err error) {
+	if localPath == "" {
+		for _, rpath := range remotePaths {
+			couples = append(couples, fileCouple{filepath.Base(rpath), rpath})
+		}
+		return
+	}
+
+	// local-path given and exists
+	if fi, err := os.Stat(localPath); !os.IsNotExist(err) {
+		if fi.IsDir() {
+			for _, rpath := range remotePaths {
+				lpath := filepath.Join(localPath, filepath.Base(rpath))
+				couples = append(couples, fileCouple{lpath, rpath})
+			}
+			return couples, nil
+		}
+
+		if len(remotePaths) > 1 {
+			return couples, fmt.Errorf("E! local-path is not a directy: %s", localPath)
+		}
+
+		// It is a existing file
+		couples = append(couples, fileCouple{localPath, remotePaths[0]})
+		return couples, nil
+	}
+
+	// local-path given but does not exist
+	if len(remotePaths) > 1 {
+		return couples, fmt.Errorf("E! local-path is not an existing directy: %s", localPath)
+	}
+
+	couples = append(couples, fileCouple{localPath, remotePaths[0]})
+	return
+}
+
+// resolveUploads forms pairs of local- and remote files for upload.
 func resolveUploads(localPath, remotePath string) (couples []fileCouple, err error) {
 	localFiles, err := filepath.Glob(localPath)
 	if err != nil {
@@ -375,11 +398,11 @@ func resolveUploads(localPath, remotePath string) (couples []fileCouple, err err
 	}
 
 	// globs i.e. remote-path must specify a directory
-	if remotePath != "" && !strings.HasSuffix(remotePath, sep) {
-		err = fmt.Errorf("E! local-path contains glob characters hence remote-path must be empty or specify a directory that must end with a slash")
-		return
-	}
 
+	// if remotePath != "" && !strings.HasSuffix(remotePath, sep) {
+	// 	err = fmt.Errorf("E! local-path contains glob characters hence remote-path must be empty or specify a directory that must end with a slash")
+	// 	return
+	// }
 	for _, lfile := range localFiles {
 		remPath := filepath.Join(remotePath, filepath.Base(lfile))
 		couples = append(couples, fileCouple{lfile, remPath})
