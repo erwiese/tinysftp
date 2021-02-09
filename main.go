@@ -52,9 +52,8 @@ func main() {
 				Aliases:     []string{"U"},
 				Destination: &rawURL,
 				// man sftp: The destination may be specified either as [user@]host[:path] or as a URI in the form sftp://[user@]host[:port][/path].
-				Usage:    "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port, as you may know it from sftp",
-				EnvVars:  []string{"SFTPGO_URL", "GDCSFTP_URL"},
-				Required: true,
+				Usage:   "SFTP Server URL in the form sftp://user:pass@server.sftp.com:port, as you may know it from sftp",
+				EnvVars: []string{"SFTPGO_URL", "GDCSFTP_URL"},
 			},
 			&cli.BoolFlag{
 				Name:        "ignoreHostKey",
@@ -74,6 +73,11 @@ func main() {
 					remotePath := "."
 					if c.NArg() == 1 {
 						remotePath = c.Args().First()
+					}
+
+					if rawURL == "" {
+						fmt.Fprintf(c.App.Writer, "Required flag \"URI\" not set\n\n")
+						cli.ShowAppHelpAndExit(c, 1)
 					}
 
 					parsedURL, err := url.Parse(rawURL)
@@ -121,6 +125,12 @@ If it does and local-path is specified, then local-path must specify a directory
 						fmt.Fprintf(c.App.Writer, "no remote-path given\n\n")
 						cli.ShowCommandHelpAndExit(c, "get", 1)
 					}
+
+					if rawURL == "" {
+						fmt.Fprintf(c.App.Writer, "Required flag \"URI\" not set\n\n")
+						cli.ShowAppHelpAndExit(c, 1)
+					}
+
 					remotePath := c.Args().Get(0)
 					localPath := c.Args().Get(1)
 
@@ -195,6 +205,11 @@ specify a directory.`,
 					if c.NArg() < 1 {
 						fmt.Fprintf(c.App.Writer, "no local-path given\n\n")
 						cli.ShowCommandHelpAndExit(c, "put", 1)
+					}
+
+					if rawURL == "" {
+						fmt.Fprintf(c.App.Writer, "Required flag \"URI\" not set\n\n")
+						cli.ShowAppHelpAndExit(c, 1)
 					}
 					//fmt.Println(c.Args().Slice())
 

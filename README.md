@@ -11,9 +11,18 @@ Only the most important features are implemented:
 Make sure you have a working Go environment. [See
 the install instructions for Go](http://golang.org/doc/install.html).
 
-To install, simply run:
+To install the command-line client:
 ```
-$ go get -u github.com/erwiese/tinysftp
+# clone the project: 
+git clone https://github.com/erwiese/tinysftp.git
+
+cd tinysftp
+go build|install
+```
+
+Import library:
+```
+$ go get github.com/erwiese/tinysftp
 ```
 
 ## Usage
