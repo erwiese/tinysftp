@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -22,7 +23,7 @@ type Client struct {
 func NewClient(conn *ssh.Client) (*Client, error) {
 	sc, err := sftp.NewClient(conn)
 	if err != nil {
-		return nil, fmt.Errorf("Could not start SFTP subsystem: %v", err)
+		return nil, fmt.Errorf("start SFTP subsystem: %v", err)
 	}
 
 	return &Client{sc}, nil
@@ -51,12 +52,12 @@ func (c *Client) List(remoteDir string) error {
 	fmt.Fprintf(os.Stdout, "Listing [%s] ...\n\n", remoteDir)
 	files, err := c.sftpc.ReadDir(remoteDir)
 	if err != nil {
-		return fmt.Errorf("Could not list remote dir: %v", err)
+		return fmt.Errorf("list remote dir: %v", err)
 	}
 
 	for _, f := range files {
 		name := f.Name()
-		modTime := f.ModTime().Format("2006-01-02 15:04:05")
+		modTime := f.ModTime().Format(time.DateTime)
 		size := fmt.Sprintf("%12d", f.Size())
 		if f.IsDir() {
 			name = name + "/"
