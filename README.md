@@ -6,6 +6,9 @@ Only the most important features are implemented:
 * get
 * put
 
+# Update Oct-2023: 
+Use https://github.com/melbahja/goph with a lot more features
+
 ## Installation
 
 Make sure you have a working Go environment. [See
